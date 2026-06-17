@@ -27,7 +27,8 @@
 	x(move)				\
 	x(in_worker)			\
 	x(submitted)			\
-	x(convert_unwritten)
+	x(convert_unwritten)		\
+	x(defer_reservation)
 
 enum __bch_write_flags {
 #define x(f)	__BCH_WRITE_##f,
@@ -75,6 +76,8 @@ struct bch_write_op {
 	struct closure		cl;
 	struct bch_fs		*c;
 	void			(*end_io)(struct bch_write_op *);
+	bool			(*nocow_fast_check)(struct bch_write_op *);
+	int			(*reserve_cow)(struct bch_write_op *);
 	u64			start_time;
 
 #ifdef CONFIG_BCACHEFS_ASYNC_OBJECT_LISTS
@@ -99,6 +102,7 @@ struct bch_write_op {
 	struct bch_inode_opts	opts;
 
 	u32			subvol;
+	u32			snapshot;
 	struct bpos		pos;
 	struct bversion		version;
 
