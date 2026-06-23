@@ -45,6 +45,7 @@ static void bch2_readpages_end_io(struct bio *bio)
 struct readpages_iter {
 	struct address_space	*mapping;
 	unsigned		idx;
+	u32			snapshot;
 	folios			folios;
 };
 
@@ -194,45 +195,65 @@ static void bchfs_read(struct btree_trans *trans,
 	bch2_trans_begin(trans);
 
 	u32 snapshot;
-	ret = bch2_subvolume_get_snapshot(trans, inum.subvol, &snapshot);
-	if (ret)
-		goto err;
+	if (readpages_iter && readpages_iter->snapshot) {
+		snapshot = readpages_iter->snapshot;
+	} else {
+		ret = bch2_subvolume_get_snapshot(trans, inum.subvol, &snapshot);
+		if (ret)
+			goto err;
+	}
 
 	CLASS(btree_iter, iter)(trans, BTREE_ID_extents,
 			     POS(inum.inum, rbio->bio.bi_iter.bi_sector),
 			     BTREE_ITER_slots|BTREE_ITER_prefetch);
+
+	u64 extent_end = 0;
+	enum btree_id cached_data_btree = BTREE_ID_extents;
+	struct bpos cached_pos = POS(inum.inum, rbio->bio.bi_iter.bi_sector);
+
 	while (1) {
 		struct bkey_s_c k;
 		unsigned bytes, sectors;
 		s64 offset_into_extent;
-		enum btree_id data_btree = BTREE_ID_extents;
+		enum btree_id data_btree;
 
 		bch2_trans_begin(trans);
 
-		bch2_btree_iter_set_snapshot(&iter, snapshot);
+		if (rbio->bio.bi_iter.bi_sector >= extent_end) {
+			data_btree = BTREE_ID_extents;
 
-		bch2_btree_iter_set_pos(&iter,
-				POS(inum.inum, rbio->bio.bi_iter.bi_sector));
+			bch2_btree_iter_set_snapshot(&iter, snapshot);
 
-		k = bch2_btree_iter_peek_slot(&iter);
-		ret = bkey_err(k);
-		if (ret)
-			goto err;
+			bch2_btree_iter_set_pos(&iter,
+					POS(inum.inum, rbio->bio.bi_iter.bi_sector));
 
-		offset_into_extent = iter.pos.offset -
+			k = bch2_btree_iter_peek_slot(&iter);
+			ret = bkey_err(k);
+			if (ret)
+				goto err;
+
+			offset_into_extent = iter.pos.offset -
+				bkey_start_offset(k.k);
+
+			bch2_bkey_buf_reassemble(&sk, k);
+
+			ret = bch2_read_indirect_extent(trans, &data_btree,
+						&offset_into_extent, &sk);
+			if (ret)
+				goto err;
+
+			k = bkey_i_to_s_c(sk.k);
+			extent_end = k.k->p.offset;
+			cached_data_btree = data_btree;
+			cached_pos = iter.pos;
+		} else {
+			k = bkey_i_to_s_c(sk.k);
+			data_btree = cached_data_btree;
+		}
+
+		offset_into_extent = rbio->bio.bi_iter.bi_sector -
 			bkey_start_offset(k.k);
 		sectors = k.k->size - offset_into_extent;
-
-		bch2_bkey_buf_reassemble(&sk, k);
-
-		ret = bch2_read_indirect_extent(trans, &data_btree,
-					&offset_into_extent, &sk);
-		if (ret)
-			goto err;
-
-		k = bkey_i_to_s_c(sk.k);
-
-		sectors = min_t(unsigned, sectors, k.k->size - offset_into_extent);
 
 		if (readpages_iter) {
 			ret = readpage_bio_extend(trans, readpages_iter, &rbio->bio, sectors,
@@ -251,23 +272,8 @@ static void bchfs_read(struct btree_trans *trans,
 
 		bch2_bio_page_state_set(c, &rbio->bio, k);
 
-		bch2_read_extent(trans, rbio, iter.pos,
+		bch2_read_extent(trans, rbio, cached_pos,
 				 data_btree, k, offset_into_extent, flags);
-		/*
-		 * Careful there's a landmine here if bch2_read_extent() ever
-		 * starts returning transaction restarts here.
-		 *
-		 * We've changed rbio->bi_iter.bi_size to be "bytes we can read
-		 * from this extent" with the swap call, and we restore it
-		 * below. That restore needs to come before checking for
-		 * errors.
-		 *
-		 * But unlike bch2_read(), we use the rbio bvec iter, not one
-		 * on the stack, so we can't do the restore right after the
-		 * bch2_read_extent() call: we don't own that iterator anymore
-		 * if BCH_READ_last_fragment is set, since we may have submitted
-		 * that rbio instead of cloning it.
-		 */
 
 		if (flags & BCH_READ_last_fragment)
 			break;
@@ -282,7 +288,7 @@ err:
 
 	if (ret) {
 		CLASS(printbuf, buf)();
-		bch2_read_err_msg_trans(trans, &buf, rbio, iter.pos);
+		bch2_read_err_msg_trans(trans, &buf, rbio, cached_pos);
 		prt_printf(&buf, "data read error: %s", bch2_err_str(ret));
 		bch_err_ratelimited(c, "%s", buf.buf);
 
@@ -322,6 +328,11 @@ void bch2_readahead(struct readahead_control *ractl)
 	}
 
 	struct btree_trans *trans = bch2_trans_get(c);
+
+	/* Resolve snapshot once for the entire readahead batch: */
+	bch2_subvolume_get_snapshot(trans, inode_inum(inode).subvol,
+				    &readpages_iter.snapshot);
+
 	while ((folio = readpage_iter_peek(&readpages_iter))) {
 		unsigned n = min_t(unsigned,
 				   readpages_iter.folios.nr -

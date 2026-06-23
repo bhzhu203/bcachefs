@@ -2148,16 +2148,23 @@ static bool bch2_nocow_write(struct bch_write_op *op)
 	op->flags &= ~BCH_WRITE_convert_unwritten;
 
 	trans = bch2_trans_get(c);
-retry:
-	bch2_trans_begin(trans);
 
 	if (op->snapshot) {
 		snapshot = op->snapshot;
 	} else {
+retry_snapshot:
 		ret = bch2_subvolume_get_snapshot(trans, op->subvol, &snapshot);
-		if (unlikely(ret))
+		if (unlikely(ret)) {
+			if (bch2_err_matches(ret, BCH_ERR_transaction_restart)) {
+				bch2_trans_begin(trans);
+				goto retry_snapshot;
+			}
 			goto err;
+		}
 	}
+
+retry:
+	bch2_trans_begin(trans);
 
 	if (op->new_i_size == U64_MAX) {
 		op->flags |= BCH_WRITE_convert_unwritten;
