@@ -1558,7 +1558,7 @@ unsigned long bch2_fs_ra_pages(struct bch_fs *c)
 		for_each_member_device_rcu(c, ca, NULL)
 			if (READ_ONCE(ca->disk_sb.bdev))
 				ra_pages += bch2_dev_rotational(c, ca->dev_idx)
-					? ra_per_dev * 4
+					? ra_per_dev * 2
 					: ra_per_dev;
 
 	return ra_pages ?: VM_READAHEAD_PAGES;

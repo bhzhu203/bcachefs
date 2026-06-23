@@ -973,7 +973,7 @@ static int btree_path_prefetch(struct btree_trans *trans, struct btree_path *pat
 	struct btree_node_iter node_iter = l->iter;
 	bool has_hdd = !bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX);
 	unsigned nr = test_bit(BCH_FS_started, &c->flags)
-		? (path->level > 1 ? 0 : (has_hdd ? 8 : 2))
+		? (path->level > 1 ? 0 : (has_hdd ? 4 : 2))
 		: (path->level > 1 ? 1 : 16);
 
 	struct bkey_buf tmp __cleanup(bch2_bkey_buf_exit);
@@ -1002,7 +1002,7 @@ static int btree_path_prefetch_j(struct btree_trans *trans, struct btree_path *p
 	struct bkey_s_c k;
 	bool has_hdd = !bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX);
 	unsigned nr = test_bit(BCH_FS_started, &c->flags)
-		? (path->level > 1 ? 0 : (has_hdd ? 8 : 2))
+		? (path->level > 1 ? 0 : (has_hdd ? 4 : 2))
 		: (path->level > 1 ? 1 : 16);
 	bool was_locked = btree_node_locked(path, path->level);
 	int ret = 0;
