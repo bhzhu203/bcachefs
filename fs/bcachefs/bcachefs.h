@@ -549,6 +549,10 @@ struct bch_dev {
 	u64			congested_last;
 
 	struct io_count __percpu *io_done;
+
+	/* Nocow flush batching: coalesce per-inode flushes into one PREFLUSH per device */
+	struct llist_head	nocow_flush_pending;
+	struct delayed_work	nocow_flush_work;
 };
 
 /*

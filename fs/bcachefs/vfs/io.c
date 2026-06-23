@@ -57,10 +57,130 @@ static void nocow_flush_endio(struct bio *_bio)
 	bio_put(&bio->bio);
 }
 
+/*
+ * Batched nocow flush: coalesce multiple per-inode PREFLUSH requests
+ * for the same device into a single PREFLUSH bio, reducing HDD seeks.
+ */
+struct nocow_flush_batch_bio {
+	struct bio		bio;
+	struct bch_dev		*ca;
+};
+
+static void nocow_flush_batch_endio(struct bio *_bio)
+{
+	struct nocow_flush_batch_bio *batch =
+		container_of(_bio, struct nocow_flush_batch_bio, bio);
+	struct bch_dev *ca = batch->ca;
+
+	/*
+	 * The batch entries are stored in the bio's bi_private as a
+	 * reversed llist. Iterate and complete each closure.
+	 */
+	struct llist_node *entries = _bio->bi_private;
+
+	while (entries) {
+		struct llist_node *next = entries->next;
+		struct nocow_flush_batch_entry *e =
+			container_of(entries, struct nocow_flush_batch_entry, node);
+
+		closure_put(e->cl);
+		kfree(e);
+		entries = next;
+	}
+
+	enumerated_ref_put(&ca->io_ref[WRITE],
+			   BCH_DEV_WRITE_REF_nocow_flush);
+	bio_put(&batch->bio);
+}
+
+void nocow_flush_batch_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct bch_dev *ca = container_of(dwork, struct bch_dev, nocow_flush_work);
+
+	/* Drain all pending flush entries for this device */
+	struct llist_node *entries = llist_del_all(&ca->nocow_flush_pending);
+	if (!entries)
+		return;
+
+	/* Reverse the list so we complete in submission order */
+	entries = llist_reverse_order(entries);
+
+	struct nocow_flush_batch_bio *batch =
+		container_of(bio_alloc_bioset(ca->disk_sb.bdev, 0,
+					      REQ_OP_WRITE|REQ_PREFLUSH,
+					      GFP_KERNEL,
+					      &ca->fs->vfs.nocow_flush_bioset),
+			     struct nocow_flush_batch_bio, bio);
+	batch->ca			= ca;
+	batch->bio.bi_private		= entries;
+	batch->bio.bi_end_io		= nocow_flush_batch_endio;
+	submit_bio(&batch->bio);
+}
+
+static void bch2_inode_flush_nocow_writes_batched(struct bch_fs *c,
+						  struct bch_inode_info *inode,
+						  struct closure *cl)
+{
+	struct bch_devs_mask devs = inode->ei_devs_need_flush;
+	memset(&inode->ei_devs_need_flush, 0, sizeof(inode->ei_devs_need_flush));
+
+	if (bitmap_empty(devs.d, BCH_SB_MEMBERS_MAX))
+		return;
+
+	unsigned dev;
+	for_each_set_bit(dev, devs.d, BCH_SB_MEMBERS_MAX) {
+		struct bch_dev *ca;
+
+		scoped_guard(rcu) {
+			ca = rcu_dereference(c->devs[dev]);
+			if (ca && !enumerated_ref_tryget(&ca->io_ref[WRITE],
+							 BCH_DEV_WRITE_REF_nocow_flush))
+				ca = NULL;
+		}
+
+		if (!ca)
+			continue;
+
+		struct nocow_flush_batch_entry *e = kmalloc(sizeof(*e), GFP_KERNEL);
+		if (!e) {
+			/* Fallback: submit immediate flush */
+			struct nocow_flush *bio = container_of(
+				bio_alloc_bioset(ca->disk_sb.bdev, 0,
+						 REQ_OP_WRITE|REQ_PREFLUSH,
+						 GFP_KERNEL,
+						 &c->vfs.nocow_flush_bioset),
+				struct nocow_flush, bio);
+			bio->cl			= cl;
+			bio->ca			= ca;
+			bio->bio.bi_end_io	= nocow_flush_endio;
+			closure_bio_submit(&bio->bio, cl);
+			continue;
+		}
+
+		e->cl = cl;
+		e->ca = ca;
+		closure_get(cl);
+
+		llist_add(&e->node, &ca->nocow_flush_pending);
+		mod_delayed_work(system_unbound_wq, &ca->nocow_flush_work, 1);
+	}
+}
+
 void bch2_inode_flush_nocow_writes_async(struct bch_fs *c,
 					 struct bch_inode_info *inode,
 					 struct closure *cl)
 {
+	/*
+	 * For rotational devices, batch multiple inode flushes into one
+	 * PREFLUSH per device to reduce seeks. For SSDs, submit immediately
+	 * since flushes are cheap.
+	 */
+	if (!bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX)) {
+		bch2_inode_flush_nocow_writes_batched(c, inode, cl);
+		return;
+	}
+
 	struct bch_devs_mask devs = inode->ei_devs_need_flush;
 	memset(&inode->ei_devs_need_flush, 0, sizeof(inode->ei_devs_need_flush));
 

@@ -1461,6 +1461,10 @@ retry:
 
 	BUG_ON(!req->wp->sectors_free || req->wp->sectors_free == UINT_MAX);
 
+	/* For HDD: proactively refill freelist when running low */
+	if (req->wp->sectors_free < req->wp->prev_sectors_free / 4)
+		bch2_writepoint_prealloc(c);
+
 	return 0;
 err:
 	open_bucket_for_each(c, &req->wp->ptrs, ob, i)
@@ -2007,4 +2011,33 @@ void __bch2_wait_on_allocator(struct btree_trans *trans,
 			return;
 		}
 	}
+}
+
+/*
+ * Background bucket pre-allocation for HDD: when a writepoint is running
+ * low on space, proactively trigger discard/invalidation to ensure free
+ * buckets are available, avoiding synchronous allocation stalls.
+ */
+void bch2_writepoint_prealloc_work(struct work_struct *work)
+{
+	struct bch_fs *c = container_of(work, struct bch_fs,
+					allocator.prealloc_work.work);
+
+	if (!test_bit(BCH_FS_started, &c->flags))
+		return;
+
+	/*
+	 * Proactively trigger discard and invalidation to replenish the
+	 * freelist. This ensures buckets are available for the next write
+	 * without blocking in the foreground allocator.
+	 */
+	bch2_do_discards_async(c);
+	bch2_do_invalidates(c);
+}
+
+void bch2_writepoint_prealloc(struct bch_fs *c)
+{
+	if (!bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX))
+		mod_delayed_work(c->write_ref_wq, &c->allocator.prealloc_work,
+				 msecs_to_jiffies(100));
 }

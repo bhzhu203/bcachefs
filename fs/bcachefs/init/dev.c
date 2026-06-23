@@ -227,6 +227,8 @@
 
 #include "sb/members.h"
 
+#include "vfs/io.h"
+
 #define x(n)		#n,
 const char * const bch2_dev_read_refs[] = {
 	BCH_DEV_READ_REFS()
@@ -474,6 +476,20 @@ void bch2_dev_free(struct bch_dev *ca)
 	WARN_ON(!enumerated_ref_is_zero(&ca->io_ref[READ]));
 
 	cancel_work_sync(&ca->io_error_work);
+	cancel_delayed_work_sync(&ca->nocow_flush_work);
+
+	/* Drain any remaining pending flush entries */
+	{
+		struct llist_node *entries = llist_del_all(&ca->nocow_flush_pending);
+		while (entries) {
+			struct llist_node *next = entries->next;
+			struct nocow_flush_batch_entry *e =
+				container_of(entries, struct nocow_flush_batch_entry, node);
+			closure_put(e->cl);
+			kfree(e);
+			entries = next;
+		}
+	}
 
 	bch2_dev_unlink(ca);
 
@@ -562,6 +578,9 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 	init_completion(&ca->ref_completion);
 
 	INIT_WORK(&ca->io_error_work, bch2_io_error_work);
+
+	init_llist_head(&ca->nocow_flush_pending);
+	INIT_DELAYED_WORK(&ca->nocow_flush_work, nocow_flush_batch_work);
 
 	bch2_time_stats_quantiles_init(&ca->io_latency[READ]);
 	bch2_time_stats_quantiles_init(&ca->io_latency[WRITE]);

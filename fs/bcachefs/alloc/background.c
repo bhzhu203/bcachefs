@@ -10,6 +10,8 @@
 #include "alloc/foreground.h"
 #include "alloc/lru.h"
 
+#include <linux/backing-dev.h>
+
 #include "btree/bkey_buf.h"
 #include "btree/cache.h"
 #include "btree/key_cache.h"
@@ -1616,6 +1618,24 @@ void bch2_recalc_capacity(struct bch_fs *c)
 
 	bch2_set_ra_pages(c, bch2_fs_ra_pages(c));
 
+#ifndef NO_BCACHEFS_FS
+	if (c->vfs_sb && !bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX)) {
+		/*
+		 * HDD: allow more dirty pages before writeback triggers,
+		 * accumulating larger batches for sequential write.
+		 */
+		bdi_set_max_ratio(c->vfs_sb->s_bdi, 40);
+
+		/*
+		 * HDD: auto-bump journal flush delay to batch more
+		 * transactions per journal write (5s vs default 1s).
+		 * Only if user hasn't explicitly set a non-default value.
+		 */
+		if (c->opts.journal_flush_delay == 1000)
+			c->opts.journal_flush_delay = 5000;
+	}
+#endif
+
 	gc_reserve = c->opts.gc_reserve_bytes
 		? c->opts.gc_reserve_bytes >> 9
 		: div64_u64(capacity * c->opts.gc_reserve_percent, 100);
@@ -1727,10 +1747,13 @@ void bch2_dev_allocator_add(struct bch_fs *c, struct bch_dev *ca)
 void bch2_fs_allocator_background_init(struct bch_fs *c)
 {
 	spin_lock_init(&c->allocator.freelist_lock);
+	INIT_DELAYED_WORK(&c->allocator.prealloc_work, bch2_writepoint_prealloc_work);
 }
 
 void bch2_fs_capacity_exit(struct bch_fs *c)
 {
+	cancel_delayed_work_sync(&c->allocator.prealloc_work);
+
 	percpu_free_rwsem(&c->capacity.mark_lock);
 	if (c->capacity.pcpu) {
 		u64 v = percpu_u64_get(&c->capacity.pcpu->online_reserved);

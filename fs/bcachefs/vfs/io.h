@@ -18,6 +18,12 @@ struct nocow_flush {
 	struct bio		bio;
 };
 
+struct nocow_flush_batch_entry {
+	struct llist_node	node;
+	struct closure		*cl;
+	struct bch_dev		*ca;
+};
+
 struct folio_vec {
 	struct folio	*fv_folio;
 	size_t		fv_offset;
@@ -161,6 +167,8 @@ static inline bool bch2_fdm_dropped_locks(struct bch_fs *c)
 
 void bch2_inode_flush_nocow_writes_async(struct bch_fs *,
 			struct bch_inode_info *, struct closure *);
+
+void nocow_flush_batch_work(struct work_struct *);
 
 int __must_check bch2_write_inode_size(struct bch_fs *,
 				       struct bch_inode_info *,

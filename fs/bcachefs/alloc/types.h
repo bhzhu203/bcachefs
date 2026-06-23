@@ -188,6 +188,8 @@ struct bch_fs_allocator {
 
 	struct write_point	btree_write_point;
 	struct write_point	reconcile_write_point;
+
+	struct delayed_work	prealloc_work;
 };
 
 typedef struct {

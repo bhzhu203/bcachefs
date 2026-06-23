@@ -465,4 +465,7 @@ static inline void bch2_wait_on_allocator(struct btree_trans *trans,
 		__bch2_wait_on_allocator(trans, req, err, cl);
 }
 
+void bch2_writepoint_prealloc_work(struct work_struct *);
+void bch2_writepoint_prealloc(struct bch_fs *);
+
 #endif /* _BCACHEFS_ALLOC_FOREGROUND_H */
