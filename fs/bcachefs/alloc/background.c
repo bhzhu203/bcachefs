@@ -1619,21 +1619,8 @@ void bch2_recalc_capacity(struct bch_fs *c)
 	bch2_set_ra_pages(c, bch2_fs_ra_pages(c));
 
 #ifndef NO_BCACHEFS_FS
-	if (c->vfs_sb && !bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX)) {
-		/*
-		 * HDD: allow more dirty pages before writeback triggers,
-		 * accumulating larger batches for sequential write.
-		 */
+	if (c->vfs_sb && !bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX))
 		bdi_set_max_ratio(c->vfs_sb->s_bdi, 40);
-
-		/*
-		 * HDD: auto-bump journal flush delay to batch more
-		 * transactions per journal write (5s vs default 1s).
-		 * Only if user hasn't explicitly set a non-default value.
-		 */
-		if (c->opts.journal_flush_delay == 1000)
-			c->opts.journal_flush_delay = 5000;
-	}
 #endif
 
 	gc_reserve = c->opts.gc_reserve_bytes
