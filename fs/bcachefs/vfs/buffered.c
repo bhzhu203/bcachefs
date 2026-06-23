@@ -567,9 +567,12 @@ static bool can_write_now(struct bch_fs *c, unsigned replicas_want, struct closu
 	 * writeback to avoid saturating device bandwidth with competing IO streams.
 	 * This is especially important for nocow writeback which bypasses the
 	 * allocator-based open bucket check above.
+	 *
+	 * Use 7/8 threshold (instead of 3/4) to maintain steady writeback flow
+	 * on HDD, avoiding stop-burst patterns that interfere with sequential reads.
 	 */
 	if (atomic_long_read(&c->btree.cache.nr_in_flight_inner) >
-	    BTREE_WRITE_IO_LIMIT(c) * 3 / 4) {
+	    BTREE_WRITE_IO_LIMIT(c) * 7 / 8) {
 		closure_wait(&c->btree.cache.nr_in_flight_wait, cl);
 		return false;
 	}
