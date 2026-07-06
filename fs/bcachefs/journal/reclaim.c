@@ -5,6 +5,7 @@
 #include "alloc/buckets.h"
 #include "alloc/replicas.h"
 
+#include "btree/cache.h"
 #include "btree/key_cache.h"
 #include "btree/update.h"
 #include "btree/write_buffer.h"
