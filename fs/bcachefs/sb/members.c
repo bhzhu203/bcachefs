@@ -491,6 +491,8 @@ void bch2_sb_members_to_cpu(struct bch_fs *c)
 		mod_bit(ca->dev_idx, c->devs_rotational.d, ca->mi.rotational);
 	}
 
+	bch2_trans_throttle_update(c);
+
 	struct bch_sb_field_members_v2 *mi2 = bch2_sb_field_get(c->disk_sb.sb, members_v2);
 	if (mi2)
 		for (unsigned i = 0; i < c->sb.nr_devices; i++) {
