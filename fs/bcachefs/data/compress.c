@@ -97,7 +97,7 @@ static struct bbuf __bounce_alloc(struct bch_fs *c, unsigned size, int rw)
 
 	BUG_ON(size > c->opts.encoded_extent_max);
 
-	b = kmalloc(size, GFP_NOFS|__GFP_NOWARN);
+	b = kmalloc(size, GFP_NOFS|__GFP_NOWARN|__GFP_RECLAIMABLE);
 	if (b)
 		return (struct bbuf) { .c = c, .b = b, .type = BB_kmalloc, .rw = rw };
 
