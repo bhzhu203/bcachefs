@@ -1565,9 +1565,15 @@ int bch2_fs_btree_cache_init(struct bch_fs *c)
 	 * default (2) to make the kernel prefer reclaiming page cache
 	 * (sequential re-reads) over btree nodes under memory pressure.
 	 * On SSD the default is fine since random reads are cheap.
+	 *
+	 * HDD uses 6 (up from 4) to further protect btree cache: with
+	 * __GFP_NORETRY on all bcachefs allocations, compaction is rarely
+	 * triggered by bcachefs itself, but other processes may still wake
+	 * kcompactd. A higher seeks value ensures the kernel reclaims page
+	 * cache (cheap to re-read) instead of btree nodes (expensive random IO).
 	 */
 	shrink->seeks = bitmap_empty(c->devs_rotational.d, BCH_SB_MEMBERS_MAX)
-		? 2 : 4;
+		? 2 : 6;
 	shrink->private_data	= &bc->live[0];
 	shrinker_register(shrink);
 

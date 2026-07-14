@@ -255,7 +255,7 @@ void *bch2_btree_bounce_alloc(struct bch_fs *c, size_t size, bool *used_mempool)
 	void *p = kvmalloc(size, GFP_NOWAIT|__GFP_ACCOUNT|__GFP_RECLAIMABLE);
 	if (!p) {
 		*used_mempool = true;
-		p = mempool_alloc(&c->btree.bounce_pool, GFP_NOFS|__GFP_ACCOUNT|__GFP_RECLAIMABLE);
+		p = mempool_alloc(&c->btree.bounce_pool, GFP_NOFS|__GFP_ACCOUNT|__GFP_RECLAIMABLE|__GFP_NORETRY);
 	}
 	return p;
 }
