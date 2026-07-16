@@ -1618,7 +1618,7 @@ static struct bio *bch2_write_bio_alloc(struct bch_fs *c,
 	bch2_bio_alloc_pages(bio,
 			     c->opts.block_size,
 			     output_available,
-			     GFP_NOFS);
+			     GFP_NOFS|__GFP_RECLAIMABLE);
 
 	unsigned required = min(output_available, c->opts.encoded_extent_max);
 
