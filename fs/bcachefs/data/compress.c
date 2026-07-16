@@ -174,7 +174,7 @@ static struct bbuf __bio_map_or_bounce(struct bch_fs *c, struct bio *bio,
 
 	struct page *stack_pages[16];
 	struct page **pages = nr_pages > ARRAY_SIZE(stack_pages)
-		? kmalloc_array(nr_pages, sizeof(struct page *), GFP_NOFS|__GFP_NORETRY)
+		? kmalloc_array(nr_pages, sizeof(struct page *), GFP_NOFS|__GFP_RECLAIMABLE|__GFP_NORETRY)
 		: stack_pages;
 	if (!pages)
 		return bio_bounce(c, bio, start, rw);
