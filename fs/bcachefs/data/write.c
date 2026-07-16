@@ -833,7 +833,7 @@ static void __bch2_bio_alloc_pages_pool(struct bch_fs *c, struct bio *bio,
 
 	while (bio->bi_iter.bi_size < size)
 		bio_add_virt_nofail(bio,
-				    mempool_alloc(&c->bio_bounce_bufs, GFP_NOFS|__GFP_NORETRY),
+				    mempool_alloc(&c->bio_bounce_bufs, GFP_NOFS|__GFP_RECLAIMABLE|__GFP_NORETRY),
 				    BIO_BOUNCE_BUF_POOL_LEN);
 
 	bio->bi_iter.bi_size = min(bio->bi_iter.bi_size, size);
@@ -844,7 +844,7 @@ static void __bch2_bio_alloc_pages_pool(struct bch_fs *c, struct bio *bio,
 void bch2_bio_alloc_pages_pool(struct bch_fs *c, struct bio *bio,
 			       unsigned bs, size_t size)
 {
-	bch2_bio_alloc_pages(bio, c->opts.block_size, size, GFP_NOFS);
+	bch2_bio_alloc_pages(bio, c->opts.block_size, size, GFP_NOFS|__GFP_RECLAIMABLE);
 
 	if (bio->bi_iter.bi_size < size)
 		__bch2_bio_alloc_pages_pool(c, bio, bs, size);
