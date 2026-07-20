@@ -179,7 +179,7 @@ void bch2_bkey_nocow_lock(struct bch_fs *c, struct bkey_ptrs_c ptrs,
 
 		/* XXX allocating memory with btree locks held - rare */
 		darray_push_gfp(&buckets, ((struct bucket_to_lock) { .b = b, .l = l, }),
-				GFP_KERNEL|__GFP_NOFAIL);
+				GFP_KERNEL|__GFP_NOFAIL|__GFP_RECLAIMABLE);
 		i++;
 	}
 

@@ -490,7 +490,7 @@ found:
 	}
 
 	struct bio *bio __free(bio_put) =
-		bio_alloc(ca->disk_sb.bdev, buf_nr_bvecs(data_buf, bytes), REQ_OP_READ, GFP_KERNEL);
+		bio_alloc(ca->disk_sb.bdev, buf_nr_bvecs(data_buf, bytes), REQ_OP_READ, GFP_KERNEL|__GFP_RECLAIMABLE);
 
 	CLASS(printbuf, buf)(); /* before first goto */
 
@@ -1409,7 +1409,7 @@ struct bkey_s_c_backpointer bch2_bp_scan_iter_peek(struct btree_trans *trans,
 			struct bkey_i_backpointer bp;
 			bkey_reassemble(&bp.k_i, k);
 			if (iter->bps.nr > limit ||
-			    darray_push_gfp(&iter->bps, bp, GFP_KERNEL|__GFP_NOWARN))
+			    darray_push_gfp(&iter->bps, bp, GFP_KERNEL|__GFP_NOWARN|__GFP_RECLAIMABLE))
 				break;
 
 			iter->pos = bpos_nosnap_successor(k.k->p);
